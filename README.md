@@ -87,7 +87,7 @@ Poniższy schemat przedstawia przepływ danych i zależności w aplikacji:
  HTTP GET /api/data   |   Framework HORSE (REST API)    |   JSON Response
 --------------------->|                                 |------------------>
                       +---------------------------------+
-
+```
 ---
 
 ## Demo
