@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html oncontextmenu="return false;">
+<head>
+  <meta charset="utf-8">
+  <link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator_midnight.min.css" rel="stylesheet">
+  <script type="text/javascript" src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; background: #0b0b0b; color: #e6e6e6; font-family: "Segoe UI", Tahoma, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    
+    #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0b0b0b; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.5s ease; }
+    .spinner { width: 50px; height: 50px; border: 4px solid #333; border-top: 4px solid #0078D7; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+    /* PASEK GÓRNY */
+    #top-bar { display: flex; justify-content: space-between; align-items: center; padding: 15px 24px; background: #1c1c1c; border-bottom: 1px solid #333; flex-shrink: 0; }
+    .spacer { flex-grow: 1; height: 30px; cursor: grab; }
+    .spacer:active { cursor: grabbing; }
+    .nav-group { display: flex; gap: 10px; align-items: center; }
+    
+    button { display: flex; align-items: center; justify-content: center; gap: 8px; background: transparent; color: #ccc; border: 1px solid transparent; padding: 13px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+    button svg { width: 22px; height: 22px; } 
+    button:hover { background: #333; color: #fff; }
+	
+    button.active-nav { background: #0078D7; color: #fff; border-color: #005A9E; }
+    
+    button.icon-btn { padding: 13px; border-radius: 8px; }
+    button.exit-btn:hover { background: #d13438; color: white; border-color: #a80000; }
+    button.action-btn { background: #333; border: 1px solid #555; color: white; }
+    button.action-btn:hover { background: #444; }
+    button.action-btn.on { background: #107c10; border-color: #0a5c0a; }
+    button.action-btn.export { background: #0078D7; border-color: #005A9E; }
+    
+    /* SPA WIDOKI */
+    #main-content { flex-grow: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+    .view { display: none; width: 100%; height: 100%; overflow-y: auto; padding: 25px; }
+    .view.active { display: flex; flex-direction: column; }
+    
+    #view-info { align-items: center; justify-content: center; }
+    .welcome-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 35px; max-width: 650px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
+    .welcome-card h2 { margin-top: 0; color: #39ff14; font-size: 24px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #333; padding-bottom: 15px; }
+    .welcome-card p, .welcome-card ul { line-height: 1.7; color: #ccc; font-size: 15px; }
+    .welcome-card span.highlight { color: #ffd700; font-weight: bold; }
+    
+    .tabs-header { display: flex; gap: 5px; border-bottom: 2px solid #333; margin-bottom: 20px; }
+    .tab-btn { background: #1c1c1c; border: 1px solid #333; border-bottom: none; padding: 12px 20px; color: #888; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 15px; font-weight: bold; }
+    .tab-btn:hover { color: #ccc; background: #262626; }
+    .tab-btn.active { color: #fff; background: #0078D7; border-color: #005A9E; }
+    .tab-content { display: none; flex-grow: 1; flex-direction: column; overflow: hidden; }
+    .tab-content.active { display: flex; }
+    
+    #log-container { flex-grow: 1; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; background: #111; padding: 15px; border-radius: 6px; border: 1px solid #333; }
+    .row { padding: 4px 4px; border-bottom: 1px solid #1c1c1c; }
+    .time { color: #666; margin-right: 8px; } .info { color: #ffffff; } .sys { color: #39ff14; } .err { color: #ff4c4c; font-weight: bold; } .key { color: #ffd700; }
+    
+    /* MODALE Z EFEKTEM PRZENIKANIA (Globalne komunikaty) */
+    .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(4px); opacity: 0; transition: opacity 0.4s ease; }
+    .modal-overlay.show { display: flex; opacity: 1; }
+    .modal { background: #1c1c1c; padding: 25px; border-radius: 8px; width: 450px; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+    .modal h3 { margin-top: 0; color: #fff; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #333; padding-bottom: 12px; }
+	
+    .global-btn-container { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+	.global-btn { background: #0078D7; border: 1px solid #005A9E; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s; width: 120px; outline: none; }
+    .global-btn:hover { background: #005A9E; }
+    <!-- .global-btn:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; background: #005A9E; }	 -->
+	.global-btn:focus { outline: 2px solid #ffffff; outline-offset: 2px; background: #005A9E; }
+		
+	/* WIDOK USTAWIEN */
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 6px; color: #bbb; font-size: 13px; }
+    .form-group input { width: 100%; padding: 12px; background: #0b0b0b; border: 1px solid #444; color: #fff; border-radius: 4px; font-family: Consolas, monospace; font-size: 14px; outline: none; }
+    
+    /* USTAWIENIA TABULATORA */
+    .tabulator { background-color: #0b0b0b !important; border: 1px solid #333 !important; border-radius: 8px; overflow: hidden; flex-grow: 1; font-family: Consolas, monospace; font-size: 13px; }
+    .tabulator-header .tabulator-col-title { color: #ffd700 !important; font-weight: bold; }
+    .tabulator-header { background-color: #1c1c1c !important; color: #ccc !important; font-size: 14px !important; border-bottom: 2px solid #333 !important; }
+    
+    .tabulator-row { background-color: #1c1c1c !important; color: #ffffff !important; border-bottom: 1px solid #2a2a2a !important; }
+    .tabulator-row:nth-child(even) { background-color: #000000 !important; } 
+    .tabulator-row:hover { background-color: #333 !important; }
+    
+    input[type="text"], input[type="search"], textarea, .tabulator-cell[tabulator-field="data"] { color: #fff !important; } /* Zwykły podgląd jest biały */
+    .tabulator-edit-box input { color: #ffd700 !important; background-color: #111 !important; outline: 1px solid #0078D7; }
+    
+    /* Paginacja */
+    .tabulator-footer { background-color: #1c1c1c !important; border-top: 1px solid #333 !important; color: #ccc !important; }
+    .tabulator-page { color: #ccc !important; border: 1px solid #555 !important; background: transparent !important; }
+    .tabulator-page.active { color: #0078D7 !important; border-color: #005A9E !important; background: transparent !important; }
+    
+    /* PASEK DOLNY */
+    #bottom-bar { display: flex; justify-content: flex-end; align-items: center; padding: 10px 24px; background: #1c1c1c; border-top: 1px solid #333; flex-shrink: 0; font-size: 13px; font-weight: 500; color: white; gap: 25px; }
+    .status-item { display: flex; align-items: center; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; margin-left: 8px; font-weight: bold; font-size: 11px; text-transform: uppercase; border: 1px solid #444; }
+    
+    /* Efekt Poświaty */
+    .badge.on { background: #107c10; border-color: #0a5c0a; color: white; box-shadow: 0 0 8px #107c10, 0 0 12px #107c10; }
+    .badge.off { background: #d13438; border-color: #a80000; color: white; box-shadow: 0 0 8px #d13438, 0 0 12px #d13438; }
+    .badge.timer { background: #e68a00; border-color: #b36b00; color: white; box-shadow: 0 0 5px rgba(230,138,0,0.5); }
+    
+    ::-webkit-scrollbar { width: 10px; } ::-webkit-scrollbar-track { background: #0b0b0b; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; } ::-webkit-scrollbar-thumb:hover { background: #555; }
+  </style>
+
+  <script>
+    let logBuffer = []; let maxVisible = 300; let syncTimerInterval = null; let currentIntervalSec = 0; let timeLeft = 0;
+    let dataTable;
+    
+	// Zmienne Globalnego Modala
+    let globalModalTimer = null; 
+    let globalModalTimeLeft = 0;
+    let globalModalCallback = null; 
+    let defaultBtnId = "";
+	
+    const MAX_JSON_DISPLAY = 90;
+    function jsonFormatter(cell) {
+      let val = cell.getValue() || "";
+      let colWidth = cell.getColumn().getWidth();
+      let maxChars = Math.floor(colWidth / 7.5); 
+      if (val.length > maxChars && maxChars > 10) {
+        return "..." + val.substring(val.length - (maxChars - 4));
+      }
+      return val;
+    }	
+	
+    function initApp() {
+      sendCmd('REQ_GRID_DATA');
+      
+      setTimeout(() => {
+        document.getElementById('loader').style.opacity = '0';
+        setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+      }, 800);
+
+      dataTable = new Tabulator("#data-table", {
+        layout: "fitColumns",
+        placeholder: "Brak danych do wyświetlenia",
+        pagination: "local",
+        paginationSize: 50,
+        paginationCounter: function(pageSize, currentRow, currentPage, totalRows, totalPages) {
+          if (totalRows === 0) return "Brak rekordów";
+          let endRow = Math.min(currentRow + pageSize - 1, totalRows);
+          return currentRow + "-" + endRow + " z " + totalRows + " rekordów";
+        },
+        langs: {
+          "default": {
+            "pagination": {
+              "first": "Pierwsza",
+              "first_title": "Pierwsza strona",
+              "last": "Ostatnia",
+              "last_title": "Ostatnia strona",
+              "prev": "<",
+              "prev_title": "Poprzednia strona",
+              "next": ">",
+              "next_title": "Następna strona",
+            }
+          }
+        },
+        columns: [
+          {title: "ID", field: "id", width: 80, hozAlign: "center"},
+          {title: "Dane (JSON)", field: "data", editor: "input", formatter: jsonFormatter}, 
+          {title: "Data zapisu", field: "created_at", width: 180}
+        ],
+        data: []
+      });
+      
+      dataTable.on("cellEdited", function(cell){
+        let rowData = cell.getRow().getData();
+        sendCmd('UPDATE_RECORD|' + rowData.id + '|' + cell.getField() + '|' + cell.getValue());
+      });
+	  
+      // OBSŁUGA KLAWIATURY DLA GLOBALNEGO MODALA
+      document.addEventListener('keydown', function(event) {
+        let gModal = document.getElementById('globalModal');
+        if (gModal && gModal.classList.contains('show')) {
+          if (event.key === 'Enter') {
+            // Jeśli żaden przycisk nie ma focusa, kliknij ten domyślny
+            if (document.activeElement.tagName !== 'BUTTON') {
+              event.preventDefault();
+              let defBtn = document.getElementById(defaultBtnId);
+              if (defBtn) defBtn.click();
+            }
+          }
+        }
+      });
+    }
+
+    function sendCmd(cmd) { window.chrome.webview.postMessage(cmd); }
+
+    function switchView(viewId, btnElement) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById(viewId).classList.add('active');
+      document.querySelectorAll('.nav-group button').forEach(btn => btn.classList.remove('active-nav'));
+      if(btnElement) btnElement.classList.add('active-nav');
+      
+      if (viewId === 'view-data') {
+        sendCmd('REQ_GRID_DATA');
+      }
+    }
+
+    function switchTab(tabId, btnElement) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      btnElement.classList.add('active');
+      
+      if(tabId === 'tab-grid') setTimeout(() => { if(dataTable) dataTable.redraw(true); }, 100);
+      if(tabId === 'tab-logs') scrollToBottom();
+    }
+
+    function appendLog(html) { logBuffer.push(html); if(logBuffer.length > 10000) logBuffer.shift(); renderLogs(); }
+    function renderLogs() {
+      let logDiv = document.getElementById("log-container"); let start = Math.max(0, logBuffer.length - maxVisible); let html = "";
+      for(let i = start; i < logBuffer.length; i++) html += "<div class=\"row\">" + logBuffer[i] + "</div>";
+      logDiv.innerHTML = html; scrollToBottom();
+    }
+    function scrollToBottom() { let logDiv = document.getElementById("log-container"); logDiv.scrollTop = logDiv.scrollHeight; }
+
+    // Informacja będzie przygotowywana i wysłana z Delphi
+    function setInfoContent(htmlContent) { document.getElementById('info-content-placeholder').innerHTML = htmlContent; }
+    
+    function loadGridData(jsonDataString) {
+      if(dataTable) {
+        try {
+          let parsedData = JSON.parse(jsonDataString);
+          dataTable.setData(parsedData);
+        } catch(e) { console.error("Błąd parsowania", e); }
+      }
+    }
+
+    function downloadReport() {
+      let htmlContent = `<html><head><meta charset="utf-8"><style>body { background: #0b0b0b; color: #e6e6e6; font-family: Consolas, monospace; padding: 20px; font-size: 13px; } .row { padding: 4px; border-bottom: 1px solid #1c1c1c; } .time { color: #666; margin-right: 8px; } .info { color: #fff; } .sys { color: #39ff14; } .err { color: #ff4c4c; font-weight: bold; } .key { color: #ffd700; }</style></head><body><h2>Raport Logów MyDataSync</h2>`;
+      for(let i = 0; i < logBuffer.length; i++) htmlContent += "<div class=\"row\">" + logBuffer[i] + "</div>";
+      htmlContent += "</body></html>";
+      let blob = new Blob([htmlContent], {type: "text/html;charset=utf-8"}); let url = URL.createObjectURL(blob); let a = document.createElement('a'); a.href = url; a.download = "Raport_Logow.html"; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    function setSyncState(isOn, intervalSec) {
+      let btn = document.getElementById("btnSyncSet"); let badge = document.getElementById("badgeSync"); let timerBox = document.getElementById("timer-container"); let timerBadge = document.getElementById("syncTimer");
+      if (isOn) {
+        btn.classList.add("on"); btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Zatrzymaj Synchronizację`; 
+        badge.className = "badge on"; badge.innerText = "ON"; timerBox.style.display = "flex"; currentIntervalSec = intervalSec; timeLeft = intervalSec; timerBadge.innerText = timeLeft + " s";
+        if (!syncTimerInterval) { syncTimerInterval = setInterval(function() { if (timeLeft > 0) timeLeft--; timerBadge.innerText = timeLeft + " s"; }, 1000); }
+      } else {
+        btn.classList.remove("on"); btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Uruchom Synchronizację`; 
+        badge.className = "badge off"; badge.innerText = "OFF"; timerBox.style.display = "none";
+        if (syncTimerInterval) { clearInterval(syncTimerInterval); syncTimerInterval = null; }
+      }
+    }
+    
+    function restartCountdown() { timeLeft = currentIntervalSec; document.getElementById("syncTimer").innerText = timeLeft + " s"; sendCmd('REQ_GRID_DATA'); }
+    
+    function setServerState(isOn) {
+      let btn = document.getElementById("btnServerSet"); let badge = document.getElementById("badgeServer");
+      if(isOn) { 
+        btn.classList.add("on"); btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line></svg> Zatrzymaj Serwer`; 
+        badge.className = "badge on"; badge.innerText = "ON"; 
+      } else { 
+        btn.classList.remove("on"); btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line></svg> Uruchom Serwer`; 
+        badge.className = "badge off"; badge.innerText = "OFF"; 
+      }
+    }
+    
+    function loadSettingsForm(apiUrl, intervalSec) { document.getElementById('inpApiUrl').value = apiUrl; document.getElementById('inpInterval').value = intervalSec; }
+    
+    function saveSettings() {
+      let url = document.getElementById('inpApiUrl').value; let intervalSec = document.getElementById('inpInterval').value;
+      sendCmd('SAVE_SETTINGS|' + url + '|' + intervalSec);
+    }
+
+    /* Okna modalne */
+    function showGlobalModal(type, showTitle, titleText, message, defBtnStr, autoCloseSec, callbackYes) {
+      let modal = document.getElementById('globalModal');
+      let titleElem = document.getElementById('globalModalTitle');
+      let msgElem = document.getElementById('globalModalMessage');
+      
+      let btnYes = document.getElementById('btnGlobalYes');
+      let btnNo = document.getElementById('btnGlobalNo');
+      let btnOk = document.getElementById('btnGlobalOk');
+      
+      btnYes.style.display = 'none'; btnNo.style.display = 'none'; btnOk.style.display = 'none';
+      btnYes.innerText = "TAK"; btnNo.innerText = "NIE"; btnOk.innerText = "OK";
+      
+      msgElem.innerHTML = message;
+      globalModalCallback = callbackYes;
+      
+	  let svgInfo = `<svg viewBox="0 0 24 24" fill="none" stroke="#39ff14" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="32" height="32"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>`;
+      let svgError = `<svg viewBox="0 0 24 24" fill="none" stroke="#ff4c4c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="32" height="32"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`;
+      let svgQuestion = `<svg viewBox="0 0 24 24" fill="none" stroke="#ffd700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="32" height="32"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
+      
+      if (showTitle) {
+        titleElem.style.display = 'flex';
+        if (type === 'question') titleElem.innerHTML = `${svgQuestion} <span style="color:#ffd700; margin-left: 10px;">${titleText}</span>`;
+        else if (type === 'error') titleElem.innerHTML = `${svgError} <span style="color:#ff4c4c; margin-left: 10px;">${titleText}</span>`;
+        else titleElem.innerHTML = `${svgInfo} <span style="color:#39ff14; margin-left: 10px;">${titleText}</span>`;
+      } else {
+        titleElem.style.display = 'none';
+      }
+
+      if (type === 'question') {
+        btnYes.style.display = 'block'; btnNo.style.display = 'block';
+        defaultBtnId = (defBtnStr === 'TAK') ? 'btnGlobalYes' : 'btnGlobalNo';
+      } else {
+        btnOk.style.display = 'block';
+        defaultBtnId = 'btnGlobalOk';
+      }
+      
+      modal.classList.add('show');
+      let defBtnElem = document.getElementById(defaultBtnId);
+      
+      if (globalModalTimer) clearInterval(globalModalTimer);
+      
+      // Odsunięty focus (żeby przeglądarka zdążyła narysować okno przed ustawieniem ramki)
+      setTimeout(() => { if(defBtnElem) defBtnElem.focus(); }, 250);
+	  
+      if (autoCloseSec > 0) {
+        globalModalTimeLeft = autoCloseSec;
+        defBtnElem.innerText = `${defBtnStr} (${globalModalTimeLeft} s)`;
+        
+        globalModalTimer = setInterval(() => {
+          globalModalTimeLeft--;
+          if (globalModalTimeLeft <= 0) { 
+            document.getElementById(defaultBtnId).click(); 
+          } else { 
+            defBtnElem.innerText = `${defBtnStr} (${globalModalTimeLeft} s)`; 
+          }
+        }, 1000);
+      }
+    }
+
+    function stopGlobalTimer() {
+      if (globalModalTimer) {
+        clearInterval(globalModalTimer);
+        globalModalTimer = null;
+        document.getElementById('btnGlobalYes').innerText = "TAK";
+        document.getElementById('btnGlobalNo').innerText = "NIE";
+        document.getElementById('btnGlobalOk').innerText = "OK";
+      }
+    }
+
+    function btnGlobalYesClick() { stopGlobalTimer(); document.getElementById('globalModal').classList.remove('show'); if (globalModalCallback) globalModalCallback(); }
+    function btnGlobalNoClick() { stopGlobalTimer(); document.getElementById('globalModal').classList.remove('show'); }
+    function btnGlobalOkClick() { stopGlobalTimer(); document.getElementById('globalModal').classList.remove('show'); if (globalModalCallback) globalModalCallback(); }
+
+    function askForExit() {
+      showGlobalModal('question', true, 'Zakończenie pracy', 'Czy chcesz zakończyć pracę?', 'NIE', 7, function() {
+        sendCmd('EXIT');
+      });
+    }
+
+    window.onload = initApp;
+  </script>
+</head>
+<body>
+  
+  <div id="loader"><div class="spinner"></div><div style="color: #888; font-family: 'Segoe UI', sans-serif; letter-spacing: 2px;">CZEKAJ...</div></div>
+
+  <div id="top-bar">
+    <div class="nav-group">
+      <button class="active-nav" onclick="switchView('view-data', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+        Dane
+      </button>
+    </div>
+    
+    <div class="spacer" onmousedown="sendCmd('DRAG_WINDOW')"></div>
+    
+    <div class="nav-group">
+	  <button class="icon-btn" title="Informacja" onclick="switchView('view-info', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="32" height="32"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+      </button>
+      <button class="icon-btn" title="Ustawienia" onclick="switchView('view-settings', this); sendCmd('REQ_SETTINGS_FORM');">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
+      <button class="icon-btn exit-btn" title="Koniec" onclick="askForExit()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+  </div>
+  
+  <div id="main-content">
+  
+    <div id="view-data" class="view active">
+      <div class="tabs-header">
+        <button class="tab-btn active" onclick="switchTab('tab-grid', this)">Dane źródłowe</button>
+        <button class="tab-btn" onclick="switchTab('tab-logs', this)">Status synchronizacji</button>
+      </div>
+      
+      <div id="tab-grid" class="tab-content active">
+        <div id="data-table"></div>
+      </div>
+      
+      <div id="tab-logs" class="tab-content">
+        <div style="margin-bottom: 15px;">
+          <button class="action-btn export" onclick="downloadReport()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Eksportuj raport
+          </button>
+        </div>
+        <div id="log-container"></div>
+      </div>
+    </div>
+
+    <div id="view-info" class="view">
+      <div class="welcome-card" id="info-content-placeholder"></div>
+    </div>
+    
+    <div id="view-settings" class="view">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 900px; margin: 0 auto; width: 100%;">
+        <div style="background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 25px;">
+          <h3 style="margin-top: 0; color: #fff; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg> Parametry aplikacji</h3>
+          <div class="form-group">
+            <label>Adres API (URL):</label>
+            <input type="text" id="inpApiUrl">
+          </div>
+          <div class="form-group">
+            <label>Interwał synchronizacji (sekundy):</label>
+            <input type="number" id="inpInterval">
+          </div>
+          <button class="action-btn" style="width: 100%; margin-top: 10px;" onclick="saveSettings()">Zapisz</button>
+        </div>
+        
+        <div style="background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 25px;">
+          <h3 style="margin-top: 0; color: #fff; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg> Zarządzanie usługami</h3>
+          <p style="color: #888; font-size: 13px; margin-top: 0;">Kontroluj procesy działające w tle. Status widoczny na dolnym pasku.</p>
+          
+          <button id="btnSyncSet" class="action-btn" style="width: 100%; margin-bottom: 15px;" onclick="sendCmd('SYNC')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            Uruchom Synchronizację
+          </button>
+          
+          <button id="btnServerSet" class="action-btn" style="width: 100%;" onclick="sendCmd('SERVER')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line></svg>
+            Uruchom Serwer
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div id="bottom-bar">
+    <div id="timer-container" class="status-item" style="display: none;">Następna synchronizacja: <span id="syncTimer" class="badge timer">--</span></div>
+    <div class="status-item">Synchronizacja <span id="badgeSync" class="badge off">OFF</span></div>
+    <div class="status-item">Serwer <span id="badgeServer" class="badge off">OFF</span></div>
+  </div>
+
+  <div id="globalModal" class="modal-overlay">
+    <div class="modal">
+      <h3 id="globalModalTitle" style="border: none; margin-bottom: 5px;"></h3>
+      <p id="globalModalMessage" style="color: #ccc; font-size: 15px; margin-bottom: 25px; line-height: 1.5;"></p>
+      
+      <div class="global-btn-container">
+        <button id="btnGlobalYes" class="global-btn" onclick="btnGlobalYesClick()">TAK</button>
+        <button id="btnGlobalNo" class="global-btn" onclick="btnGlobalNoClick()">NIE</button>
+        <button id="btnGlobalOk" class="global-btn" onclick="btnGlobalOkClick()">OK</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

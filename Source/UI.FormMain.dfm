@@ -1,0 +1,43 @@
+object FormMain: TFormMain
+  AlignWithMargins = True
+  Left = 0
+  Top = 0
+  BorderStyle = bsNone
+  Caption = 'FormMain'
+  ClientHeight = 648
+  ClientWidth = 989
+  Color = clBlack
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -12
+  Font.Name = 'Segoe UI'
+  Font.Style = []
+  Padding.Left = 2
+  Padding.Top = 2
+  Padding.Right = 2
+  Padding.Bottom = 2
+  Position = poDesktopCenter
+  OnCloseQuery = FormCloseQuery
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  TextHeight = 15
+  object EdgeBrowserMain: TEdgeBrowser
+    AlignWithMargins = True
+    Left = 2
+    Top = 2
+    Width = 985
+    Height = 644
+    Margins.Left = 0
+    Margins.Top = 0
+    Margins.Right = 0
+    Margins.Bottom = 0
+    Align = alClient
+    TabOrder = 0
+    AllowSingleSignOnUsingOSPrimaryAccount = False
+    TargetCompatibleBrowserVersion = '117.0.2045.28'
+    UserDataFolder = '%LOCALAPPDATA%\bds.exe.WebView2'
+    OnCreateWebViewCompleted = EdgeBrowserLogCreateWebViewCompleted
+    OnNavigationCompleted = EdgeBrowserLogNavigationCompleted
+    OnWebMessageReceived = EdgeBrowserLogWebMessageReceived
+  end
+end
