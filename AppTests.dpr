@@ -3,20 +3,32 @@
 {$IFNDEF TESTINSIGHT}
 {$APPTYPE CONSOLE}
 {$ENDIF}
+{$R App.dres}
 
 uses
   System.SysUtils,
   DUnitX.Loggers.Console,
   DUnitX.Loggers.Xml.NUnit,
-  DUnitX.TestFramework,  
+  DUnitX.TestFramework,
   Core.Interfaces in 'Source\Core.Interfaces.pas',
   Services.Sync in 'Source\Services.Sync.pas',
-  Tests.SyncService in 'Tests\Tests.SyncService.pas';
+  Services.HorseServer in 'Source\Services.HorseServer.pas',
+  Infrastructure.Config in 'Source\Infrastructure.Config.pas',
+  Infrastructure.Container in 'Source\Infrastructure.Container.pas',
+  Infrastructure.Logger in 'Source\Infrastructure.Logger.pas',
+  Infrastructure.ApiClient in 'Source\Infrastructure.ApiClient.pas',
+  Infrastructure.Database.SQLite in 'Source\Infrastructure.Database.SQLite.pas',
+  Infrastructure.Database.Firebird in 'Source\Infrastructure.Database.Firebird.pas',
+  Infrastructure.Database.Oracle in 'Source\Infrastructure.Database.Oracle.pas',
+  Infrastructure.Database.MSSQL in 'Source\Infrastructure.Database.MSSQL.pas',
+  UI.FormMain in 'Source\UI.FormMain.pas',
+  Tests.Frontend in 'Tests\Tests.Frontend.pas',
+  Tests.Backend in 'Tests\Tests.Backend.pas';
 
 var
   runner: ITestRunner;
   results: IRunResults;
-  logger: ITestLogger;
+  Logger: ITestLogger;
   nunitLogger: ITestLogger;
 
 begin
@@ -26,8 +38,8 @@ begin
     runner.UseRTTI := True;
 
     // Logowanie wyników do konsoli
-    logger := TDUnitXConsoleLogger.Create(True);
-    runner.AddLogger(logger);
+    Logger := TDUnitXConsoleLogger.Create(True);
+    runner.AddLogger(Logger);
 
     // Zrzut wyników do XML
     nunitLogger := TDUnitXXMLNUnitFileLogger.Create(TDUnitX.Options.XMLOutputFile);

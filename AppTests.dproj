@@ -170,7 +170,44 @@
         </DelphiCompile>
         <DCCReference Include="Source\Core.Interfaces.pas"/>
         <DCCReference Include="Source\Services.Sync.pas"/>
-        <DCCReference Include="Tests\Tests.SyncService.pas"/>
+        <DCCReference Include="Source\Services.HorseServer.pas"/>
+        <DCCReference Include="Source\Infrastructure.Config.pas"/>
+        <DCCReference Include="Source\Infrastructure.Container.pas"/>
+        <DCCReference Include="Source\Infrastructure.Logger.pas"/>
+        <DCCReference Include="Source\Infrastructure.ApiClient.pas"/>
+        <DCCReference Include="Source\Infrastructure.Database.SQLite.pas"/>
+        <DCCReference Include="Source\Infrastructure.Database.Firebird.pas"/>
+        <DCCReference Include="Source\Infrastructure.Database.Oracle.pas"/>
+        <DCCReference Include="Source\Infrastructure.Database.MSSQL.pas"/>
+        <DCCReference Include="Source\UI.FormMain.pas"/>
+        <DCCReference Include="Tests\Tests.Frontend.pas">
+            <Form>,
+  Tests.Backend in &apos;Tests\Tests.Backend.pas&apos;</Form>
+            <DesignClass>ITestRunner;
+  results: IRunResults;
+  logger: ITestLogger;
+  nunitLogger: ITestLogger;
+
+begin
+  try
+    // Tworzenie runnera testów
+    runner := TDUnitX.CreateRunner;
+    runner.UseRTTI := True;
+
+    // Logowanie wyników do konsoli
+    logger := TDUnitXConsoleLogger.Create(True);
+    runner.AddLogger(logger);
+
+    // Zrzut wyników do XML
+    nunitLogger := TDUnitXXMLNUnitFileLogger.Create(TDUnitX.Options.XMLOutputFile);
+    runner.AddLogger(nunitLogger);
+
+    // Uruchomienie wszystkich zarejestrowanych testów
+    results := runner.Execute;
+
+{$IFNDEF CI</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Tests\Tests.Backend.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

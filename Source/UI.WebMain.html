@@ -37,7 +37,7 @@
     .view { display: none; width: 100%; height: 100%; overflow-y: auto; padding: 25px; }
     .view.active { display: flex; flex-direction: column; }
     
-    #view-info { align-items: center; justify-content: center; }
+    #view-info, #view-settings { align-items: center; justify-content: center; }
     .welcome-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 35px; max-width: 650px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
     .welcome-card h2 { margin-top: 0; color: #39ff14; font-size: 24px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #333; padding-bottom: 15px; }
     .welcome-card p, .welcome-card ul { line-height: 1.7; color: #ccc; font-size: 15px; }
@@ -110,6 +110,7 @@
     let globalModalTimeLeft = 0;
     let globalModalCallback = null; 
     let defaultBtnId = "";
+	let resizeTimer = null; // Zmienna opóźniająca odświeżanie grida
 	
     const MAX_JSON_DISPLAY = 90;
     function jsonFormatter(cell) {
@@ -143,6 +144,7 @@
         langs: {
           "default": {
             "pagination": {
+              "page_title": "Pokaż stronę",
               "first": "Pierwsza",
               "first_title": "Pierwsza strona",
               "last": "Ostatnia",
@@ -166,6 +168,21 @@
         let rowData = cell.getRow().getData();
         sendCmd('UPDATE_RECORD|' + rowData.id + '|' + cell.getField() + '|' + cell.getValue());
       });
+	  	  
+	  // Automatyczne dopasowanie zawartości tabeli przy zmianie rozmiaru okna
+		window.addEventListener("resize", function() {
+		  // Czyścimy poprzedni timer, jeśli użytkownik nadal rozciąga okno
+		  clearTimeout(resizeTimer);
+		  
+		  // Ustawiamy nowy timer (Debounce 150ms)
+		  resizeTimer = setTimeout(function() {
+			if(dataTable) {
+			  // Funkcja redraw(true) zmusza Tabulator do ponownego przeliczenia 
+			  // szerokości kolumn i ponownego wywołania formatterów (w tym jsonFormatter)
+			  dataTable.redraw(true);
+			}
+		  }, 150); 
+		});
 	  
       // OBSŁUGA KLAWIATURY DLA GLOBALNEGO MODALA
       document.addEventListener('keydown', function(event) {

@@ -106,8 +106,8 @@ begin
     FApiKey := 'SECRET_TOKEN_123'; // Domyślny klucz zabezpieczający
     FWindowLeft := 100;
     FWindowTop := 100;
-    FWindowWidth := 1024;
-    FWindowHeight := 760;
+    FWindowWidth := 1050;
+    FWindowHeight := 800;
 
     LJson.AddPair('apiUrl', FApiUrl);
     LJson.AddPair('dbType', 'sqlite'); // Wartości: sqlite, oracle, firebird, mssql
