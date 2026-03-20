@@ -351,14 +351,6 @@ begin
   end;
 end;
 
-// procedure TFormMain.btnSettingsRequest;
-// var
-// LConfig: IAppConfig;
-// begin
-// // Pobieramy obecne wartoœci z kontenera DI i odpalamy ustawienia
-// LConfig := TContainer.Resolve<IAppConfig>;
-// EdgeBrowserMain.ExecuteScript(Format('openSettingsModal("%s", %d);', [LConfig.GetApiUrl, LConfig.GetWorkerInterval]));
-// end;
 
 procedure TFormMain.SaveSettingsUpdate(const AApiUrl: string; AIntervalMs: Integer);
 var
