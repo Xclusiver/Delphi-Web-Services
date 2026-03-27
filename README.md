@@ -21,7 +21,7 @@ Projekt stanowi demonstrację budowy aplikacji z wykorzystaniem:
 - **REST API (HORSE)**  
   Lekki i szybki serwer HTTP do udostępniania danych (`/api/data`)
 
-- **Wielowątkowość (PPL + TThread)**  
+- **Wielowątkowość (PPL + TEvent)**  
   Operacje sieciowe i synchronizacja danych bez blokowania UI
 
 - **Obsługa wielu baz danych**
@@ -67,7 +67,7 @@ Poniższy schemat przedstawia przepływ danych i zależności w aplikacji:
                              |                   |
                 +------------v--+      +---------v-----------+
                 |  Sync Worker  |      |   REST ApiClient    |
-                | (TThread/PPL) |      |   (THTTPClient)     |
+                |  (PPL+TEvent) |      |   (THTTPClient)     |
                 +------------+--+      +---------+-----------+
                              |                   |
                              +---------+---------+
