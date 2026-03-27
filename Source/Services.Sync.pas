@@ -5,10 +5,11 @@ interface
 uses
   System.SysUtils,
   System.Classes,
+  System.SyncObjs,
+  System.Threading,
   Core.Interfaces;
 
 type
-  // Główny serwis synchronizujący
   TSyncService = class(TInterfacedObject, ISyncService)
   private
     FLogger: IAppLogger;
@@ -19,16 +20,21 @@ type
     procedure ExecuteSync;
   end;
 
-  // Wątek działający w tle
-  TWorkerThread = class(TThread)
+  TSyncWorker = class
   private
+    FTask: ITask;
+    FStopEvent: TEvent;
     FSyncService: ISyncService;
-    FIntervalMs: Integer;
     FLogger: IAppLogger;
-  protected
-    procedure Execute; override;
+    FIntervalMs: Integer;
+    FRunning: Boolean;
   public
     constructor Create(const ASyncService: ISyncService; const ALogger: IAppLogger; AIntervalMs: Integer);
+    destructor Destroy; override;
+
+    procedure Start;
+    procedure Stop;
+    function IsRunning: Boolean;
   end;
 
 implementation
@@ -61,33 +67,78 @@ begin
   end;
 end;
 
-constructor TWorkerThread.Create(const ASyncService: ISyncService; const ALogger: IAppLogger; AIntervalMs: Integer);
+constructor TSyncWorker.Create(const ASyncService: ISyncService; const ALogger: IAppLogger; AIntervalMs: Integer);
 begin
-  inherited Create(True); // Create suspended
+  inherited Create;
   FSyncService := ASyncService;
   FLogger := ALogger;
   FIntervalMs := AIntervalMs;
-  FreeOnTerminate := False; // Kontrolujemy cykl życia z zewnątrz
+
+  // ManualReset = True
+  FStopEvent := TEvent.Create(nil, True, False, '');
 end;
 
-procedure TWorkerThread.Execute;
+destructor TSyncWorker.Destroy;
 begin
-  NameThreadForDebugging('SyncWorkerThread');
-  FLogger.LogInfo('Worker Thread uruchomiony');
+  Stop;
+  FStopEvent.Free;
+  inherited;
+end;
 
-  while not Terminated do
-  begin
-    FSyncService.ExecuteSync;
+procedure TSyncWorker.Start;
+begin
+  if FRunning then
+    Exit;
 
-    // Zamiast blokującego Sleep, sprawdzamy co 100ms czy wątek nie został przerwany
-    var LWaitTime: Integer := 0;
-    while (not Terminated) and (LWaitTime < FIntervalMs) do
+  FStopEvent.ResetEvent;
+
+  FTask := TTask.Run(
+    procedure
+    var
+      LWaitResult: TWaitResult;
     begin
-      Sleep(100);
-      Inc(LWaitTime, 100);
+      FRunning := True;
+      FLogger.LogInfo('TSyncWorker uruchomiony');
+
+      try
+        while True do
+        begin
+          FSyncService.ExecuteSync;
+
+          LWaitResult := FStopEvent.WaitFor(FIntervalMs);
+
+          if LWaitResult = wrSignaled then
+            Break;
+        end;
+      except
+        on E: Exception do
+          FLogger.LogError('Błąd w TSyncWorker: ' + E.Message, E);
+      end;
+
+      FLogger.LogInfo('TSyncWorker zatrzymany');
+      FRunning := False;
+    end);
+end;
+
+procedure TSyncWorker.Stop;
+begin
+  if not FRunning then
+    Exit;
+
+  FStopEvent.SetEvent;
+
+  if Assigned(FTask) then
+  begin
+    try
+      FTask.Wait;
+    except
     end;
   end;
-  FLogger.LogInfo('Worker Thread zatrzymany');
+end;
+
+function TSyncWorker.IsRunning: Boolean;
+begin
+  Result := FRunning;
 end;
 
 end.

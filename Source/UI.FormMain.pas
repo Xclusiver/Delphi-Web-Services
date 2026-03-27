@@ -16,6 +16,7 @@ uses
   Vcl.ExtCtrls,
   Vcl.Themes,
   System.JSON,
+  System.SyncObjs,
   System.Threading,
   System.NetEncoding,
   System.Generics.Collections,
@@ -39,11 +40,15 @@ type
     procedure EdgeBrowserLogNavigationCompleted(Sender: TCustomEdgeBrowser; IsSuccess: Boolean;
       WebErrorStatus: COREWEBVIEW2_WEB_ERROR_STATUS);
   private
-    FWorker: TWorkerThread;
+    FWorker: TSyncWorker;
     FHorseServer: THorseServerManager;
     FLogger: IAppLogger;
     FIsClosing: Boolean;
-    FSyncSession: Integer;
+
+    FSyncTask: ITask;
+    FDbWatcherTask: ITask;
+    FStopEvent: TEvent;
+
     function LoadHtmlFromResource: string;
     function GetFormBackgroundColor: string;
     procedure btnSyncClick;
@@ -53,7 +58,6 @@ type
     procedure LogHtml(const AHtml: string);
     procedure LogMessage(AStatus: TLogStatus; const AMessage: string);
     procedure ParseAndLogJson(AJsonValue: TJSONValue; const AIndentPx: Integer = 0);
-    procedure OnWorkerTerminated(Sender: TObject);
     procedure WMNCHitTest(var Msg: TWMNCHitTest); message WM_NCHITTEST; // dla rozmiaru okna
   public
   end;
@@ -257,61 +261,78 @@ procedure TFormMain.btnSyncClick;
 var
   LSyncService: ISyncService;
   LConfig: IAppConfig;
-  LIntervalSec: Integer;
-  LCurrentSession: Integer;
+  LIntervalMs: Integer;
 begin
-  if Assigned(FWorker) then
+  // Stop
+  if Assigned(FSyncTask) then
   begin
-    Inc(FSyncSession);
-    FWorker.OnTerminate := nil;
-    FWorker.Terminate;
-    FWorker.WaitFor;
-    FreeAndNil(FWorker);
+    FStopEvent.SetEvent;
+    try
+      FSyncTask.Wait;
+      FDbWatcherTask.Wait;
+    except
+    end;
+
+    FSyncTask := nil;
+    FDbWatcherTask := nil;
 
     EdgeBrowserMain.ExecuteScript('setSyncState(false, 0);');
     LogMessage(lsSystem, 'Synchronizacja zosta³a zatrzymana');
-  end
-  else
-  begin
-    Inc(FSyncSession);
-    LCurrentSession := FSyncSession;
+    Exit;
+  end;
 
-    LSyncService := TContainer.Resolve<ISyncService>;
-    LConfig := TContainer.Resolve<IAppConfig>;
+  // Start
+  LSyncService := TContainer.Resolve<ISyncService>;
+  LConfig := TContainer.Resolve<IAppConfig>;
+  LIntervalMs := LConfig.GetWorkerInterval;
+  FStopEvent.ResetEvent;
 
-    FWorker := TWorkerThread.Create(LSyncService, FLogger, LConfig.GetWorkerInterval);
-    FWorker.Start;
+  // Task 1: API -> DB
+  FSyncTask := TTask.Run(
+    procedure
+    begin
+      LogMessage(lsSystem, 'Task Sync START');
 
-    LIntervalSec := LConfig.GetWorkerInterval div 1000;
-    EdgeBrowserMain.ExecuteScript(Format('setSyncState(true, %d);', [LIntervalSec]));
-    LogMessage(lsSystem, 'Synchronizacja uruchomiona. Pobieranie danych w tle...');
-
-    TTask.Run(
-      procedure
-      var
-        LDatabase: IDatabaseManager;
-        LJsonData: string;
-        LLastId, LCurrentId: Integer;
+      while FStopEvent.WaitFor(LIntervalMs) = wrTimeout do
       begin
         try
-          LDatabase := TContainer.Resolve<IDatabaseManager>;
-          LLastId := LDatabase.GetLastRecordId; // Zapamiêtujemy ID sprzed startu pêtli
+          LSyncService.ExecuteSync;
+        except
+          on E: Exception do
+            TThread.Queue(nil,
+              procedure
+              begin
+                LogMessage(lsError, 'B³¹d SyncTask: ' + E.Message);
+              end);
+        end;
+      end;
 
-          // Jeœli dok³adnie w tej samej milisekundzie TTask bêdzie chcia³ oceniæ warunek Assigned(FWorker)
-          // mo¿e odczytaæ uwalnian¹ pamiêæ, dlatego zakomentowa³em {and Assigned(FWorker)}
-          // Warunek sesyjny w zupe³noœci wystarczy
-          // za ka¿dym klikniêciem przycisku g³ówny w¹tek najpierw robi Inc(FSyncSession),
-          // uniewa¿niaj¹c LCurrentSession dla uœpionego TTasku,
-          // a dopiero potem bezpiecznie zamyka Workera. To daje 100% bezpieczeñstwa.
+      LogMessage(lsSystem, 'Task Sync STOP');
+    end);
 
-          while (FSyncSession = LCurrentSession) do
-          begin
+  // Task 2: DB -> UI
+  FDbWatcherTask := TTask.Run(
+    procedure
+    var
+      LDatabase: IDatabaseManager;
+      LLastId, LCurrentId: Integer;
+      LJsonData: string;
+    begin
+      LogMessage(lsSystem, 'Task DB Watcher START');
+
+      try
+        LDatabase := TContainer.Resolve<IDatabaseManager>;
+        LLastId := LDatabase.GetLastRecordId;
+
+        while FStopEvent.WaitFor(1000) = wrTimeout do
+        begin
+          try
             LCurrentId := LDatabase.GetLastRecordId;
 
-            if LCurrentId > LLastId then // Sprawdzamy czy przyby³ nowy rekord (ID jest wiêksze)
+            if LCurrentId > LLastId then
             begin
-              LLastId := LCurrentId; // Aktualizujemy pamiêæ ID
-              LJsonData := LDatabase.GetDataAsJson; // Pobieramy ten nowy JSON
+              LLastId := LCurrentId;
+              LJsonData := LDatabase.GetDataAsJson;
 
               TThread.Queue(nil,
                 procedure
@@ -319,6 +340,7 @@ begin
                   LJsonObj: TJSONValue;
                 begin
                   LogMessage(lsSystem, 'Zsynchronizowano nowy rekord z bazy:');
+
                   LJsonObj := TJSONObject.ParseJSONValue(LJsonData);
                   if Assigned(LJsonObj) then
                     try
@@ -326,31 +348,32 @@ begin
                     finally
                       LJsonObj.Free;
                     end
-                  else // W razie dziwnego tekstu
+                  else
                     LogMessage(lsInfo, LJsonData);
 
                   LogMessage(lsSystem, '---------------------------------------------------');
                   EdgeBrowserMain.ExecuteScript('restartCountdown();');
                 end);
             end;
-            Sleep(1000);
-          end;
-        except
-          on E: Exception do
-          begin
-            var
-            LErrorMsg := E.Message;
-            TThread.Queue(nil,
-              procedure
-              begin
-                LogMessage(lsError, 'B³¹d bazy w TTask: ' + LErrorMsg);
-              end);
+
+          except
+            on E: Exception do
+              TThread.Queue(nil,
+                procedure
+                begin
+                  LogMessage(lsError, 'B³¹d DB Watcher: ' + E.Message);
+                end);
           end;
         end;
-      end);
-  end;
-end;
 
+      finally
+        LogMessage(lsSystem, 'Task DB Watcher STOP');
+      end;
+    end);
+
+  EdgeBrowserMain.ExecuteScript(Format('setSyncState(true, %d);', [LIntervalMs div 1000]));
+  LogMessage(lsSystem, 'Synchronizacja uruchomiona (PPL)');
+end;
 
 procedure TFormMain.SaveSettingsUpdate(const AApiUrl: string; AIntervalMs: Integer);
 var
@@ -514,16 +537,6 @@ begin
   Result := Format('#%.2x%.2x%.2x', [GetRValue(LColor), GetGValue(LColor), GetBValue(LColor)]);
 end;
 
-procedure TFormMain.OnWorkerTerminated(Sender: TObject);
-begin
-  // Jeœli VCL zacznie cykl niszczenia (FormDestroy) ZANIM w tle zakoñczy siê w¹tek,
-  // aplikacja zawiesi siê w pamiêci RAM na komendzie WaitFor, poniewa¿ VCL zacz¹³
-  // ju¿ niszczyæ mechanizmy synchronizacji wiadomoœci.
-  // By jednoznacznie wymusiæ zakoñczenie zamiast Close stosuje Application.Terminate
-
-  Application.Terminate;
-end;
-
 procedure TFormMain.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 begin
   var LConfig: IAppConfig := TContainer.Resolve<IAppConfig>;
@@ -542,8 +555,6 @@ begin
   begin
     CanClose := False;
     FIsClosing := True;
-    FWorker.OnTerminate := OnWorkerTerminated;
-    FWorker.Terminate;
     Self.Hide;
   end
   else
@@ -567,14 +578,29 @@ begin
   EdgeBrowserMain.Visible := False;
   EdgeBrowserMain.UserDataFolder := ExtractFilePath(ParamStr(0));
   EdgeBrowserMain.CreateWebView;
+
+  FStopEvent := TEvent.Create(nil, True, False, '');
   FHorseServer := THorseServerManager.Create(FLogger, LConfig.GetHorsePort);
 end;
 
 procedure TFormMain.FormDestroy(Sender: TObject);
 begin
+  if Assigned(FStopEvent) then
+  begin
+    FStopEvent.SetEvent;
+
+    if Assigned(FSyncTask) then
+      FSyncTask.Wait;
+
+    if Assigned(FDbWatcherTask) then
+      FDbWatcherTask.Wait;
+
+    FStopEvent.Free;
+  end;
+
   if Assigned(FWorker) then
   begin
-    FWorker.WaitFor;
+    FWorker.Stop;
     FreeAndNil(FWorker);
   end;
 
