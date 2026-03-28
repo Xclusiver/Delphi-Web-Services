@@ -169,8 +169,10 @@
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
         <DCCReference Include="Source\Core.Interfaces.pas"/>
+        <DCCReference Include="Source\Core.Events.pas"/>
         <DCCReference Include="Source\Services.Sync.pas"/>
         <DCCReference Include="Source\Services.HorseServer.pas"/>
+        <DCCReference Include="Source\Infrastructure.EventBus.pas"/>
         <DCCReference Include="Source\Infrastructure.Config.pas"/>
         <DCCReference Include="Source\Infrastructure.Container.pas"/>
         <DCCReference Include="Source\Infrastructure.Logger.pas"/>
@@ -179,6 +181,7 @@
         <DCCReference Include="Source\Infrastructure.Database.Firebird.pas"/>
         <DCCReference Include="Source\Infrastructure.Database.Oracle.pas"/>
         <DCCReference Include="Source\Infrastructure.Database.MSSQL.pas"/>
+        <DCCReference Include="Source\UI.PresenterMain.pas"/>
         <DCCReference Include="Source\UI.FormMain.pas"/>
         <DCCReference Include="Tests\Tests.Frontend.pas">
             <Form>,

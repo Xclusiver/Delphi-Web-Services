@@ -11,10 +11,13 @@ uses
   Winapi.Windows,
   FireDAC.Comp.Client, // Dodane do zarządzania pulą FDManager w środowisku testowym
   Core.Interfaces,
+  Core.Events,
+  Infrastructure.EventBus,
   Infrastructure.Config,
   Infrastructure.Container,
   Infrastructure.Logger,
   Infrastructure.Database.SQLite,
+  UI.PresenterMain,
   UI.FormMain;
 
 type
@@ -54,6 +57,7 @@ implementation
 
 procedure TFrontendTests.SetupFixture;
 var
+  LEventBus: IEventBus;
   LConfig: IAppConfig;
   LLogger: IAppLogger;
 begin
@@ -89,6 +93,14 @@ begin
     function: IAppLogger
     begin
       Result := LLogger;
+    end);
+
+  LEventBus := TEventBus.Create;
+
+  TContainer.RegisterType<IEventBus>(
+    function: IEventBus
+    begin
+      Result := LEventBus;
     end);
 
   TDbSQLiteManager.InitializePool(FDbPath);

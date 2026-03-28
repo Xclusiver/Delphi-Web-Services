@@ -21,7 +21,7 @@ Projekt stanowi demonstrację budowy aplikacji z wykorzystaniem:
 - **REST API (HORSE)**  
   Lekki i szybki serwer HTTP do udostępniania danych (`/api/data`)
 
-- **Wielowątkowość (PPL + TEvent)**  
+- **Wielowątkowość (PPL + TThread)**  
   Operacje sieciowe i synchronizacja danych bez blokowania UI
 
 - **Obsługa wielu baz danych**
@@ -45,10 +45,10 @@ Poniższy schemat przedstawia przepływ danych i zależności w aplikacji:
 ```text
             +--------------------------------------------------+
             |            HYBRID UI (SPA - WebView2)            |
-            |        HTML5 / CSS3 / JavaScript (Tabulator)     |
+            |            HTML5 / CSS3 / JavaScript             |
             +-------------------------+------------------------+
-                                      | 
-                        WebMessageReceived (JS→Delphi)
+                                      |
+                        WebMessageReceived (JS -> Delphi)
                                       |
                                       v
 +----------------+    +-------------------------------+    +----------------+
@@ -56,18 +56,18 @@ Poniższy schemat przedstawia przepływ danych i zależności w aplikacji:
 | (Logi systemu) |    |      TEdgeBrowser Host        |    | (config.json)  |
 +----------------+    +---------------+---------------+    +----------------+
                                       |
-                         ExecuteScript (Delphi→JS)
+                         ExecuteScript (Delphi -> JS)
                                       |
                                       v
                     +-----------------+------------------+
                     |      KONTENER DI (TContainer)      |
-                    |  (IoC, zarządzanie zależnościami)  |
+                    |    (zarządzanie zależnościami)     |
                     +--------+-------------------+-------+
                              |                   |
                              |                   |
                 +------------v--+      +---------v-----------+
                 |  Sync Worker  |      |   REST ApiClient    |
-                |  (PPL+TEvent) |      |   (THTTPClient)     |
+                |     (PPL)     |      |   (THTTPClient)     |
                 +------------+--+      +---------+-----------+
                              |                   |
                              +---------+---------+
@@ -78,15 +78,59 @@ Poniższy schemat przedstawia przepływ danych i zależności w aplikacji:
                        |      (FireDAC + Pooling)      |
                        +--+-------+---------+-------+--+
                           |       |         |       |
-                    +-----v--++---v- --++---v--++---v-----+
-                    | SQLite || Oracle || MSSQL|| Firebird|
-                    +--------++--------++------++---------+
+                    +-----v--++---v-----++--v---++--v------+
+                    | SQLite || Oracle || MSSQL || Firebird|
+                    +--------++--------++-------++---------+
                                        ^
                                        |
                       +----------------+----------------+
  HTTP GET /api/data   |   Framework HORSE (REST API)    |   JSON Response
 --------------------->|                                 |------------------>
                       +---------------------------------+
+
+   =====================================================================
+                     EVENTBUS – ASYNCHRONICZNA KOMUNIKACJA
+   =====================================================================
+
+                          +----------------------+
+                          |      IEventBus       |
+                          | (Publish / Subscribe)|
+                          +----------+-----------+
+                                     |
+         +---------------------------+---------------------------+
+         |                           |                           |
+         |                           |                           |
+         v                           v                           v
+
++---------------------+   +---------------------+   +----------------------+
+|   Sync Worker       |   |   DB Watcher Task   |   |   Horse Server       |
+|---------------------|   |---------------------|   |----------------------|
+| Publish:            |   | Publish:            |   | Publish:             |
+| - TLogEvent         |   | - TNewDataEvent     |   | - TLogEvent          |
+| - TSyncStateEvent   |   |                     |   | - TServerStateEvent  |
++---------------------+   +---------------------+   +----------------------+
+                                     |
+                                     v
+                          +----------------------+
+                          |   TPresenterMain     |
+                          |----------------------|
+                          | Subscribe:           |
+                          | - TLogEvent          |
+                          | - TSyncStateEvent    |
+                          | - TServerStateEvent  |
+                          | - TNewDataEvent      |
+                          +----------+-----------+
+                                     |
+                        (TThread.Queue -> UI Thread)
+                                     |
+                                     v
+                          +----------------------+
+                          |      IMainView       |
+                          |     (TFormMain)      |
+                          +----------+-----------+
+                                     |
+                                     v
+                        ExecuteScript -> WebView2 UI
 ```
 ---
 

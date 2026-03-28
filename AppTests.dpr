@@ -11,8 +11,10 @@ uses
   DUnitX.Loggers.Xml.NUnit,
   DUnitX.TestFramework,
   Core.Interfaces in 'Source\Core.Interfaces.pas',
+  Core.Events in 'Source\Core.Events.pas',
   Services.Sync in 'Source\Services.Sync.pas',
   Services.HorseServer in 'Source\Services.HorseServer.pas',
+  Infrastructure.EventBus in 'Source\Infrastructure.EventBus.pas',
   Infrastructure.Config in 'Source\Infrastructure.Config.pas',
   Infrastructure.Container in 'Source\Infrastructure.Container.pas',
   Infrastructure.Logger in 'Source\Infrastructure.Logger.pas',
@@ -21,6 +23,7 @@ uses
   Infrastructure.Database.Firebird in 'Source\Infrastructure.Database.Firebird.pas',
   Infrastructure.Database.Oracle in 'Source\Infrastructure.Database.Oracle.pas',
   Infrastructure.Database.MSSQL in 'Source\Infrastructure.Database.MSSQL.pas',
+  UI.PresenterMain in 'Source\UI.PresenterMain.pas',
   UI.FormMain in 'Source\UI.FormMain.pas',
   Tests.Frontend in 'Tests\Tests.Frontend.pas',
   Tests.Backend in 'Tests\Tests.Backend.pas';

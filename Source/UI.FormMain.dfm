@@ -36,8 +36,8 @@ object FormMain: TFormMain
     AllowSingleSignOnUsingOSPrimaryAccount = False
     TargetCompatibleBrowserVersion = '117.0.2045.28'
     UserDataFolder = '%LOCALAPPDATA%\bds.exe.WebView2'
-    OnCreateWebViewCompleted = EdgeBrowserLogCreateWebViewCompleted
-    OnNavigationCompleted = EdgeBrowserLogNavigationCompleted
-    OnWebMessageReceived = EdgeBrowserLogWebMessageReceived
+    OnCreateWebViewCompleted = EdgeBrowserCreateWebViewCompleted
+    OnNavigationCompleted = EdgeBrowserNavigationCompleted
+    OnWebMessageReceived = EdgeBrowserWebMessageReceived
   end
 end

@@ -7,6 +7,8 @@ uses
   System.IOUtils,
   System.SysUtils,
   Core.Interfaces in 'Source\Core.Interfaces.pas',
+  Core.Events in 'Source\Core.Events.pas',
+  Infrastructure.EventBus in 'Source\Infrastructure.EventBus.pas',
   Infrastructure.Config in 'Source\Infrastructure.Config.pas',
   Infrastructure.Container in 'Source\Infrastructure.Container.pas',
   Infrastructure.Logger in 'Source\Infrastructure.Logger.pas',
@@ -17,22 +19,30 @@ uses
   Infrastructure.Database.MSSQL in 'Source\Infrastructure.Database.MSSQL.pas',
   Services.Sync in 'Source\Services.Sync.pas',
   Services.HorseServer in 'Source\Services.HorseServer.pas',
+  UI.PresenterMain in 'Source\UI.PresenterMain.pas',
   UI.FormMain in 'Source\UI.FormMain.pas';
 
 {$R *.res}
 
 var
+  LEventBus: IEventBus;
   LConfig: IAppConfig;
   LAppLogger: IAppLogger;
   LConfigPath: string;
 
 begin
   ReportMemoryLeaksOnShutdown := True;
-
-  // £adowanie konfiguracji JSON (jeœli nie ma, utworzy siê sama obok pliku EXE)
+  
   LConfigPath := TPath.Combine(TPath.GetDirectoryName(ParamStr(0)), 'config.json');
   LConfig := TAppConfig.Create(LConfigPath);
-  LAppLogger := TFileLogger.Create(LConfig.GetLogPath);
+  LAppLogger := TFileLogger.Create(LConfig.GetLogPath);  
+  LEventBus := TEventBus.Create;
+
+  TContainer.RegisterType<IEventBus>(
+    function: IEventBus
+    begin
+      Result := LEventBus;
+    end);
 
   // Inicjalizacja puli bazy danych (Œcie¿ka z pliku konfiguracyjnego)
   case LConfig.GetDbType of

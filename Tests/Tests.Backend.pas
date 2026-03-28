@@ -10,13 +10,16 @@ uses
   System.JSON,
   System.Net.HttpClient,
   Core.Interfaces,
+  Core.Events,
+  Infrastructure.EventBus,
   Infrastructure.Config,
   Infrastructure.Container,
   Infrastructure.Logger,
   Infrastructure.ApiClient,
   Infrastructure.Database.SQLite,
   Services.Sync,
-  Services.HorseServer;
+  Services.HorseServer,
+  UI.PresenterMain;
 
 type
 
@@ -52,6 +55,7 @@ implementation
 
 procedure TBackendTests.SetupFixture;
 var
+  LEventBus: IEventBus;
   LConfig: IAppConfig;
   LLogger: IAppLogger;
 begin
@@ -81,6 +85,14 @@ begin
     function: IAppLogger
     begin
       Result := LLogger;
+    end);
+
+  LEventBus := TEventBus.Create;
+
+  TContainer.RegisterType<IEventBus>(
+    function: IEventBus
+    begin
+      Result := LEventBus;
     end);
 
   // 2. INICJALIZACJA BAZY DANYCH (Wykonana tylko raz!)
