@@ -52,6 +52,7 @@ type
     FDbWatcherTask: ITask;
     FStopEvent: TEvent;
     FPresenter: TPresenterMain;
+    FCommandHandlers: TDictionary<string, TProc<string>>;
 
     function LoadHtmlFromResource: string;
     function GetFormBackgroundColor: string;
@@ -61,6 +62,9 @@ type
     procedure UILogHtml(const AHtml: string);
     procedure UILogMessage(AStatus: TLogStatus; const AMessage: string);
     procedure UIParseAndLogJson(AJsonValue: TJSONValue; const AIndentPx: Integer = 0);
+
+    procedure CommandHandle;
+    procedure CommandComplexHandle(const ACmd: string);
 
     procedure OnSyncRequested;
     procedure OnServerToggleRequested;
@@ -85,6 +89,25 @@ implementation
 {$R *.dfm}
 
 { ================= TOOLS UI ================= }
+
+procedure ExecuteWithRetry(const AProc: TProc; ARetries: Integer = 3);
+begin
+  for var i := 1 to ARetries do
+  begin
+    try
+      AProc;
+      Exit;
+    except
+      on E: Exception do
+      begin
+        if i = ARetries then
+          raise;
+
+        Sleep(500 * i);
+      end;
+    end;
+  end;
+end;
 
 function TFormMain.LoadHtmlFromResource: string;
 var
@@ -166,14 +189,16 @@ end;
 
 procedure TFormMain.SafeExecuteScript(const AScript: string);
 begin
-  if (csDestroying in ComponentState) then
-    Exit;
-
   if FIsClosing then
     Exit;
+  if not Assigned(EdgeBrowserMain) then
+    Exit;
+  if not Assigned(EdgeBrowserMain.DefaultInterface) then
+    Exit;
+  if csDestroying in ComponentState then
+    Exit;
 
-  if Assigned(EdgeBrowserMain) and Assigned(EdgeBrowserMain.DefaultInterface) then
-    EdgeBrowserMain.ExecuteScript(AScript);
+  EdgeBrowserMain.ExecuteScript(AScript);
 end;
 
 { ================= WEB ================= }
@@ -182,75 +207,33 @@ procedure TFormMain.EdgeBrowserWebMessageReceived(Sender: TCustomEdgeBrowser; Ar
 var
   LMessage: PChar;
   LCmd: string;
-  LParts: TArray<string>;
+  LHandler: TProc<string>;
   LJsonVal: TJSONValue;
 begin
-  if Succeeded(Args.ArgsInterface.Get_webMessageAsJson(LMessage)) then
-  begin
+  if not Succeeded(Args.ArgsInterface.Get_webMessageAsJson(LMessage)) then
+    Exit;
+
+  try
     LJsonVal := TJSONObject.ParseJSONValue(string(LMessage));
-    if Assigned(LJsonVal) then
-      try
-        LCmd := LJsonVal.Value;
-      finally
-        LJsonVal.Free;
-      end
-    else
-      LCmd := string(LMessage);
-
-    if SameText(LCmd, 'SYNC') then
-      OnSyncRequested
-    else
-      if SameText(LCmd, 'SERVER') then
-        OnServerToggleRequested
+    try
+      if Assigned(LJsonVal) then
+        LCmd := LJsonVal.Value
       else
-        if SameText(LCmd, 'EXIT') then
-          OnExitRequested
-        else
-          if SameText(LCmd, 'DRAG_WINDOW') then
-          begin
-            // Przesuwanie okna z poziomu paska HTML
-            ReleaseCapture;
-            Perform(WM_SYSCOMMAND, $F012, 0);
-          end
-          else
-            if SameText(LCmd, 'REQ_SETTINGS_FORM') then
-            begin
-              var LConfig: IAppConfig := TContainer.Resolve<IAppConfig>;
-              var LSecs: Integer := LConfig.GetWorkerInterval div 1000; // Wartoœæ w sekundach
-              SafeExecuteScript(Format('loadSettingsForm("%s", %d);', [LConfig.GetApiUrl, LSecs]));
-            end
-            else
-              if SameText(LCmd, 'REQ_GRID_DATA') then
-              begin
-                var LDatabase: IDatabaseManager := TContainer.Resolve<IDatabaseManager>;
-                var LJsonArray: string := LDatabase.GetAllDataAsJsonArray;
-                var LSafeString: TJSONString := TJSONString.Create(LJsonArray);
-                try
-                  SafeExecuteScript('loadGridData(' + LSafeString.ToJSON + ');');
-                finally
-                  LSafeString.Free;
-                end;
-              end
-              else
-                if LCmd.StartsWith('UPDATE_RECORD|') then
-                begin
-                  LParts := LCmd.Split(['|'], 4);
-                  if Length(LParts) = 4 then
-                  begin
-                    var LDb: IDatabaseManager := TContainer.Resolve<IDatabaseManager>;
-                    LDb.UpdateData(StrToIntDef(LParts[1], 0), LParts[3]);
-                    UILogMessage(lsInfo, Format('Zaktualizowano w bazie rekord o ID: %s', [LParts[1]]));
-                  end;
-                end
-                else
-                  if LCmd.StartsWith('SAVE_SETTINGS|') then
-                  begin
-                    LParts := LCmd.Split(['|']);
-                    if Length(LParts) >= 3 then
-                      // JS przys³a³ SEKUNDY, a Delphi w Configu wymaga MILISEKUND
-                      OnSaveSettingsUpdateRequested(LParts[1], StrToIntDef(LParts[2], 60) * 1000);
-                  end;
+        LCmd := string(LMessage);
+    finally
+      LJsonVal.Free;
+    end;
 
+    if FCommandHandlers.TryGetValue(LCmd, LHandler) then
+    begin
+      LHandler(LCmd);
+      Exit;
+    end;
+
+    // obs³uga bardziej z³o¿onych komend
+    CommandComplexHandle(LCmd);
+
+  finally
     CoTaskMemFree(LMessage);
   end;
 end;
@@ -265,7 +248,7 @@ begin
 end;
 
 procedure TFormMain.EdgeBrowserNavigationCompleted(Sender: TCustomEdgeBrowser; IsSuccess: Boolean;
-  WebErrorStatus: COREWEBVIEW2_WEB_ERROR_STATUS);
+WebErrorStatus: COREWEBVIEW2_WEB_ERROR_STATUS);
 var
   LInfoHtml: string;
   LSafeString: TJSONString;
@@ -306,6 +289,82 @@ begin
   end
   else
     ShowMessage('B³¹d ³adowania interfejsu webowego');
+end;
+
+{ ================= COMMAND WEB HANDLE ================= }
+
+procedure TFormMain.CommandHandle;
+begin
+  FCommandHandlers := TDictionary < string, TProc < string >>.Create;
+
+  FCommandHandlers.Add('SYNC',
+    procedure(ACmd: string)
+    begin
+      OnSyncRequested;
+    end);
+
+  FCommandHandlers.Add('SERVER',
+    procedure(ACmd: string)
+    begin
+      OnServerToggleRequested;
+    end);
+
+  FCommandHandlers.Add('EXIT',
+    procedure(ACmd: string)
+    begin
+      OnExitRequested;
+    end);
+
+  FCommandHandlers.Add('DRAG_WINDOW',
+    procedure(ACmd: string)
+    begin
+      ReleaseCapture;
+      Perform(WM_SYSCOMMAND, $F012, 0);
+    end);
+
+  FCommandHandlers.Add('REQ_SETTINGS_FORM',
+    procedure(ACmd: string)
+    begin
+      var LConfig: IAppConfig := TContainer.Resolve<IAppConfig>;
+      var LSecs: Integer := LConfig.GetWorkerInterval div 1000; // Wartoœæ w sekundach
+      SafeExecuteScript(Format('loadSettingsForm("%s", %d);', [LConfig.GetApiUrl, LSecs]));
+    end);
+
+  FCommandHandlers.Add('REQ_GRID_DATA',
+    procedure(ACmd: string)
+    begin
+      var LDatabase: IDatabaseManager := TContainer.Resolve<IDatabaseManager>;
+      var LJsonArray: string := LDatabase.GetAllDataAsJsonArray;
+      var LSafeString: TJSONString := TJSONString.Create(LJsonArray);
+      try
+        SafeExecuteScript('loadGridData(' + LSafeString.ToJSON + ');');
+      finally
+        LSafeString.Free;
+      end
+    end);
+end;
+
+procedure TFormMain.CommandComplexHandle(const ACmd: string);
+begin
+  var LParts: TArray<string>;
+  if ACmd.StartsWith('UPDATE_RECORD|') then
+  begin
+    LParts := ACmd.Split(['|'], 4);
+
+    if Length(LParts) = 4 then
+    begin
+      var LDb: IDatabaseManager := TContainer.Resolve<IDatabaseManager>;
+      LDb.UpdateData(StrToIntDef(LParts[1], 0), LParts[3]);
+      UILogMessage(lsInfo, Format('Zaktualizowano rekord ID: %s', [LParts[1]]));
+    end;
+  end
+  else
+    if ACmd.StartsWith('SAVE_SETTINGS|') then
+    begin
+      LParts := ACmd.Split(['|']);
+      if Length(LParts) >= 3 then
+        OnSaveSettingsUpdateRequested(LParts[1], StrToIntDef(LParts[2], 60) * 1000); // x1000 bo musimy mieæ milisekundy
+    end;
 end;
 
 { ================= ACTIONS ================= }
@@ -373,7 +432,11 @@ begin
       while (not FIsClosing) and (FStopEvent.WaitFor(LIntervalMs) = wrTimeout) do
       begin
         try
-          LSyncService.ExecuteSync;
+          ExecuteWithRetry(
+            procedure
+            begin
+              LSyncService.ExecuteSync;
+            end);
         except
           on E: Exception do
             TThread.Queue(nil,
@@ -490,15 +553,15 @@ end;
 
 procedure TFormMain.UIParseAndLogJson(AJsonValue: TJSONValue; const AIndentPx: Integer = 0);
 var
-  I: Integer;
+  i: Integer;
   LPair: TJSONPair;
   LValueStr, LHtmlStr: string;
 begin
   if AJsonValue is TJSONObject then
   begin
-    for I := 0 to TJSONObject(AJsonValue).Count - 1 do
+    for i := 0 to TJSONObject(AJsonValue).Count - 1 do
     begin
-      LPair := TJSONObject(AJsonValue).Pairs[I];
+      LPair := TJSONObject(AJsonValue).Pairs[i];
 
       if (LPair.JsonValue is TJSONObject) or (LPair.JsonValue is TJSONArray) then
       begin
@@ -527,10 +590,10 @@ begin
   else
     if AJsonValue is TJSONArray then
     begin
-      for I := 0 to TJSONArray(AJsonValue).Count - 1 do
+      for i := 0 to TJSONArray(AJsonValue).Count - 1 do
       begin
-        UILogHtml(Format('<div style="margin-left: %dpx"><span class="info">Wpis [%d]:</span></div>', [AIndentPx, I]));
-        UIParseAndLogJson(TJSONArray(AJsonValue).Items[I], AIndentPx + 20);
+        UILogHtml(Format('<div style="margin-left: %dpx"><span class="info">Wpis [%d]:</span></div>', [AIndentPx, i]));
+        UIParseAndLogJson(TJSONArray(AJsonValue).Items[i], AIndentPx + 20);
       end;
     end;
 end;
@@ -579,6 +642,7 @@ begin
   EdgeBrowserMain.Visible := False;
   EdgeBrowserMain.UserDataFolder := ExtractFilePath(ParamStr(0));
   EdgeBrowserMain.CreateWebView;
+  CommandHandle;
 end;
 
 procedure TFormMain.FormDestroy(Sender: TObject);
@@ -616,6 +680,9 @@ begin
 
   // 3. SERVER
   FreeAndNil(FHorseServer);
+
+  // 4. INNE
+  FreeAndNil(FCommandHandlers);
 end;
 
 { ================= VIEW ================= }

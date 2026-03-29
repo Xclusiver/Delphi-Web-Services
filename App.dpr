@@ -32,10 +32,10 @@ var
 
 begin
   ReportMemoryLeaksOnShutdown := True;
-  
+
   LConfigPath := TPath.Combine(TPath.GetDirectoryName(ParamStr(0)), 'config.json');
   LConfig := TAppConfig.Create(LConfigPath);
-  LAppLogger := TFileLogger.Create(LConfig.GetLogPath);  
+  LAppLogger := TFileLogger.Create(LConfig.GetLogPath);
   LEventBus := TEventBus.Create;
 
   TContainer.RegisterType<IEventBus>(

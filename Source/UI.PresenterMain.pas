@@ -5,9 +5,7 @@ interface
 uses
   System.SysUtils,
   System.Classes,
-  System.Threading,
   Core.Events,
-  Core.Interfaces,
   Infrastructure.EventBus;
 
 type
@@ -22,15 +20,10 @@ type
   private
     FEventBus: IEventBus;
     FView: IMainView;
+    FSubs: TArray<IEventSubscription>;
     FIsDestroyed: Boolean;
 
-    FLogHandler: TEventHandler;
-    FSyncHandler: TEventHandler;
-    FServerHandler: TEventHandler;
-    FDataHandler: TEventHandler;
-
     procedure SubscribeEvents;
-    procedure UnsubscribeEvents;
   public
     constructor Create(aView: IMainView; aEventBus: IEventBus);
     destructor Destroy; override;
@@ -43,19 +36,22 @@ implementation
 constructor TPresenterMain.Create(aView: IMainView; aEventBus: IEventBus);
 begin
   inherited Create;
-
-  // Bez REF COUNT
-  Pointer(FView) := Pointer(aView);
+  FView := aView;
   FEventBus := aEventBus;
 end;
 
 destructor TPresenterMain.Destroy;
+var
+  i: Integer;
 begin
   FIsDestroyed := True;
-  UnsubscribeEvents;
 
-  // Dodatkowe zerowanie
-  Pointer(FView) := nil;
+  for i := 0 to High(FSubs) do
+    if Assigned(FSubs[i]) then
+      FSubs[i].Unsubscribe;
+
+  FView := nil;
+
   inherited;
 end;
 
@@ -64,123 +60,112 @@ begin
   SubscribeEvents;
 end;
 
+{ ================= EVENT SUBSCRIPTIONS ================= }
+
 procedure TPresenterMain.SubscribeEvents;
 begin
+  // W każdym evencie operujemy wyłącznie na kopiach danych przed TThread.Queue!
+  // np.:
+  // var LType: TLogEventType := TLogEvent(AEvent).EventType;
+  // var LMsg: string := TLogEvent(AEvent).Message;
+  // var LIsRunning: Boolean := TSyncStateEvent(AEvent).IsRunning;
+  // itd...
+
+  SetLength(FSubs, 4);
+
   // LOG
-  FLogHandler := procedure(AEvent: TObject)
-  var
-    LView: IMainView;
-    LType: TLogEventType;
-    LMsg: string;
-  begin
-    if FIsDestroyed then Exit;
+  FSubs[0] := FEventBus.Subscribe(TLogEvent,
+    procedure(AEvent: TObject)
+    begin
+      if FIsDestroyed then
+        Exit;
 
-    LView := FView;
-    if LView = nil then Exit;
+      // kopiujemy dane
+      var LType: TLogEventType := TLogEvent(AEvent).EventType;
+      var LMsg: string := TLogEvent(AEvent).Message;
 
-    var E := TLogEvent(AEvent);
-    LType := E.EventType;
-    LMsg := E.Message;
+      TThread.Queue(nil,
+        procedure
+        var LView: IMainView;
+        begin
+          if FIsDestroyed then
+            Exit;
 
-    TThread.Queue(nil,
-      procedure
-      begin
-        if FIsDestroyed or (LView = nil) then Exit;
-        LView.ViewRenderLog(LType, LMsg);
-      end);
-  end;
+          LView := FView;
+          if Assigned(LView) then
+            LView.ViewRenderLog(LType, LMsg);
+        end);
+    end);
 
-  FEventBus.Subscribe(TLogEvent, FLogHandler);
+  // SYNC STATE
+  FSubs[1] := FEventBus.Subscribe(TSyncStateEvent,
+    procedure(AEvent: TObject)
+    begin
+      if FIsDestroyed then
+        Exit;
 
-  // SYNC
-  FSyncHandler := procedure(AEvent: TObject)
-  var
-    LView: IMainView;
-    LRunning: Boolean;
-    LInterval: Integer;
-  begin
-    if FIsDestroyed then Exit;
+      // kopiujemy dane
+      var LIsRunning: Boolean := TSyncStateEvent(AEvent).IsRunning;
+      var LInterval: Integer := TSyncStateEvent(AEvent).IntervalSec;
 
-    LView := FView;
-    if LView = nil then Exit;
+      TThread.Queue(nil,
+        procedure
+        var LView: IMainView;
+        begin
+          if FIsDestroyed then
+            Exit;
 
-    var E := TSyncStateEvent(AEvent);
-    LRunning := E.IsRunning;
-    LInterval := E.IntervalSec;
+          LView := FView;
+          if Assigned(LView) then
+            LView.ViewUpdateSyncState(LIsRunning, LInterval);
+        end);
+    end);
 
-    TThread.Queue(nil,
-      procedure
-      begin
-        if FIsDestroyed or (LView = nil) then Exit;
-        LView.ViewUpdateSyncState(LRunning, LInterval);
-      end);
-  end;
+  // SERVER STATE
+  FSubs[2] := FEventBus.Subscribe(TServerStateEvent,
+    procedure(AEvent: TObject)
+    begin
+      if FIsDestroyed then
+        Exit;
 
-  FEventBus.Subscribe(TSyncStateEvent, FSyncHandler);
+      // kopiujemy dane
+      var LIsRunning: Boolean := TServerStateEvent(AEvent).IsRunning;
 
-  // SERVER
-  FServerHandler := procedure(AEvent: TObject)
-  var
-    LView: IMainView;
-    LRunning: Boolean;
-  begin
-    if FIsDestroyed then Exit;
+      TThread.Queue(nil,
+        procedure
+        var LView: IMainView;
+        begin
+          if FIsDestroyed then
+            Exit;
 
-    LView := FView;
-    if LView = nil then Exit;
+          LView := FView;
+          if Assigned(LView) then
+            LView.ViewUpdateServerState(LIsRunning);
+        end);
+    end);
 
-    var E := TServerStateEvent(AEvent);
-    LRunning := E.IsRunning;
+  // NEW DATA
+  FSubs[3] := FEventBus.Subscribe(TNewDataEvent,
+    procedure(AEvent: TObject)
+    begin
+      if FIsDestroyed then
+        Exit;
 
-    TThread.Queue(nil,
-      procedure
-      begin
-        if FIsDestroyed or (LView = nil) then Exit;
-        LView.ViewUpdateServerState(LRunning);
-      end);
-  end;
+      // kopiujemy dane
+      var LJson: string := TNewDataEvent(AEvent).Json;
 
-  FEventBus.Subscribe(TServerStateEvent, FServerHandler);
+      TThread.Queue(nil,
+        procedure
+        var LView: IMainView;
+        begin
+          if FIsDestroyed then
+            Exit;
 
-  // DATA
-  FDataHandler := procedure(AEvent: TObject)
-  var
-    LView: IMainView;
-    LJson: string;
-  begin
-    if FIsDestroyed then Exit;
-
-    LView := FView;
-    if LView = nil then Exit;
-
-    var E := TNewDataEvent(AEvent);
-    LJson := E.Json;
-
-    TThread.Queue(nil,
-      procedure
-      begin
-        if FIsDestroyed or (LView = nil) then Exit;
-        LView.ViewDisplayNewData(LJson);
-      end);
-  end;
-
-  FEventBus.Subscribe(TNewDataEvent, FDataHandler);
-end;
-
-procedure TPresenterMain.UnsubscribeEvents;
-begin
-  if Assigned(FEventBus) then
-  begin
-    FEventBus.Unsubscribe(TLogEvent, FLogHandler);
-    FEventBus.Unsubscribe(TSyncStateEvent, FSyncHandler);
-    FEventBus.Unsubscribe(TServerStateEvent, FServerHandler);
-    FEventBus.Unsubscribe(TNewDataEvent, FDataHandler);
-  end;
-
-  FLogHandler := nil;
-  FSyncHandler := nil;
-  FServerHandler := nil;
-  FDataHandler := nil;
+          LView := FView;
+          if Assigned(LView) then
+            LView.ViewDisplayNewData(LJson);
+        end);
+    end);
 end;
 
 end.
