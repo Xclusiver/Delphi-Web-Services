@@ -1,8 +1,12 @@
 program App;
 
 {$R *.dres}
+//{$DEFINE FullDebugMode}
 
 uses
+{$IFDEF FullDebugMode}
+  FastMM5,
+{$ENDIF}
   Vcl.Forms,
   System.IOUtils,
   System.SysUtils,

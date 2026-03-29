@@ -78,6 +78,8 @@ type
     procedure ViewUpdateServerState(AIsRunning: Boolean);
   end;
 
+procedure ExecuteWithRetry(const AProc: TProc; ARetries: Integer = 3);
+
 const
   NOTIFY_CLOSE_SEC = 7;
 
@@ -87,6 +89,157 @@ var
 implementation
 
 {$R *.dfm}
+
+{ ================= ACTIONS ================= }
+
+procedure TFormMain.OnSyncRequested;
+var
+  LSyncService: ISyncService;
+  LConfig: IAppConfig;
+  LIntervalMs: Integer;
+begin
+  // Stop
+  if Assigned(FSyncTask) then
+  begin
+    FStopEvent.SetEvent;
+    FSyncTask := nil;
+    FDbWatcherTask := nil;
+
+    FEventBus.Publish(TSyncStateEvent.Create(False, 0));
+    UILogMessage(lsSystem, 'Synchronizacja zosta³a zatrzymana');
+    Exit;
+  end;
+
+  // Start
+  LSyncService := TContainer.Resolve<ISyncService>;
+  LConfig := TContainer.Resolve<IAppConfig>;
+  LIntervalMs := LConfig.GetWorkerInterval;
+  FStopEvent.ResetEvent;
+
+  // Task 1: API -> DB
+  FSyncTask := TTask.Run(
+    procedure
+    begin
+      UILogMessage(lsSystem, 'Task Sync START');
+
+      while not FIsClosing do
+      begin
+        if FStopEvent.WaitFor(LIntervalMs) <> wrTimeout then
+          Break;
+
+        try
+          if FIsClosing then
+            Exit;
+
+          ExecuteWithRetry(
+            procedure
+            begin
+              LSyncService.ExecuteSync;
+            end);
+        except
+          on E: Exception do
+            TThread.Queue(nil,
+              procedure
+              begin
+                UILogMessage(lsError, 'B³¹d SyncTask: ' + E.Message);
+              end);
+        end;
+      end;
+
+      UILogMessage(lsSystem, 'Task Sync STOP');
+    end);
+
+  // Task 2: DB -> UI
+  FDbWatcherTask := TTask.Run(
+    procedure
+    var
+      LDatabase: IDatabaseManager;
+      LLastId, LCurrentId: Integer;
+    begin
+      UILogMessage(lsSystem, 'Task DB Watcher START');
+
+      try
+        LDatabase := TContainer.Resolve<IDatabaseManager>;
+        LLastId := LDatabase.GetLastRecordId;
+
+        while not FIsClosing do
+        begin
+          if FStopEvent.WaitFor(1000) <> wrTimeout then
+            Break;
+
+          try
+            if FIsClosing then
+              Exit;
+
+            LCurrentId := LDatabase.GetLastRecordId;
+
+            if LCurrentId > LLastId then
+            begin
+              LLastId := LCurrentId;
+              FEventBus.Publish(TNewDataEvent.Create(LDatabase.GetDataAsJson));
+            end;
+
+          except
+            on E: Exception do
+              TThread.Queue(nil,
+                procedure
+                begin
+                  UILogMessage(lsError, 'B³¹d DB Watcher: ' + E.Message);
+                end);
+          end;
+        end;
+
+      finally
+        UILogMessage(lsSystem, 'Task DB Watcher STOP');
+      end;
+    end);
+
+  FEventBus.Publish(TSyncStateEvent.Create(True, LIntervalMs div 1000));
+  UILogMessage(lsSystem, 'Synchronizacja uruchomiona (PPL)');
+end;
+
+procedure TFormMain.OnSaveSettingsUpdateRequested(const AApiUrl: string; AIntervalMs: Integer);
+var
+  LConfig: IAppConfig;
+begin
+  LConfig := TContainer.Resolve<IAppConfig>;
+  LConfig.UpdateSettings(AApiUrl, AIntervalMs);
+  UILogMessage(lsSystem, 'Pomyœlnie zaktualizowano plik ustawieñ.');
+
+  // Wyœwietlamy Modal (Wartoœæ 0 = Modal nie zamknie siê sam)
+  SafeExecuteScript('showGlobalModal("info", true, "Informacja", "Konfiguracja zapisana", "OK", 0, null);');
+
+  if Assigned(FSyncTask) then
+  begin
+    OnSyncRequested;
+    OnSyncRequested; // To celowe
+    UILogMessage(lsInfo, 'Automatycznie zrestartowano us³ugê synchronizacji z nowymi parametrami.');
+  end;
+end;
+
+procedure TFormMain.OnExitRequested;
+begin
+  // Zamkniêcie przegl¹darki przed zamkniêciem Formy rozwi¹zuje problem blokowania
+  if Assigned(EdgeBrowserMain) then
+    EdgeBrowserMain.CloseWebView;
+  Close;
+end;
+
+procedure TFormMain.OnServerToggleRequested;
+begin
+  if Assigned(FHorseServer) and not FHorseServer.Started then
+  begin
+    FHorseServer.Start;
+    FEventBus.Publish(TServerStateEvent.Create(True));
+    UILogMessage(lsSystem, 'Serwer zosta³ uruchomiony');
+  end
+  else
+  begin
+    FHorseServer.Stop;
+    FEventBus.Publish(TServerStateEvent.Create(False));
+    UILogMessage(lsSystem, 'Serwer zosta³ zatrzymany');
+  end;
+end;
 
 { ================= TOOLS UI ================= }
 
@@ -248,7 +401,7 @@ begin
 end;
 
 procedure TFormMain.EdgeBrowserNavigationCompleted(Sender: TCustomEdgeBrowser; IsSuccess: Boolean;
-WebErrorStatus: COREWEBVIEW2_WEB_ERROR_STATUS);
+  WebErrorStatus: COREWEBVIEW2_WEB_ERROR_STATUS);
 var
   LInfoHtml: string;
   LSafeString: TJSONString;
@@ -365,151 +518,6 @@ begin
       if Length(LParts) >= 3 then
         OnSaveSettingsUpdateRequested(LParts[1], StrToIntDef(LParts[2], 60) * 1000); // x1000 bo musimy mieæ milisekundy
     end;
-end;
-
-{ ================= ACTIONS ================= }
-
-procedure TFormMain.OnExitRequested;
-begin
-  // Zamkniêcie przegl¹darki przed zamkniêciem Formy rozwi¹zuje problem blokowania
-  if Assigned(EdgeBrowserMain) then
-    EdgeBrowserMain.CloseWebView;
-  Close;
-end;
-
-procedure TFormMain.OnServerToggleRequested;
-begin
-  if Assigned(FHorseServer) and not FHorseServer.Started then
-  begin
-    FHorseServer.Start;
-    FEventBus.Publish(TServerStateEvent.Create(True));
-    UILogMessage(lsSystem, 'Serwer zosta³ uruchomiony');
-  end
-  else
-  begin
-    FHorseServer.Stop;
-    FEventBus.Publish(TServerStateEvent.Create(False));
-    UILogMessage(lsSystem, 'Serwer zosta³ zatrzymany');
-  end;
-end;
-
-procedure TFormMain.OnSyncRequested;
-var
-  LSyncService: ISyncService;
-  LConfig: IAppConfig;
-  LIntervalMs: Integer;
-begin
-  // Stop
-  if Assigned(FSyncTask) then
-  begin
-    FStopEvent.SetEvent;
-    try
-      FSyncTask.Wait;
-      FDbWatcherTask.Wait;
-    except
-    end;
-
-    FSyncTask := nil;
-    FDbWatcherTask := nil;
-
-    FEventBus.Publish(TSyncStateEvent.Create(False, 0));
-    UILogMessage(lsSystem, 'Synchronizacja zosta³a zatrzymana');
-    Exit;
-  end;
-
-  // Start
-  LSyncService := TContainer.Resolve<ISyncService>;
-  LConfig := TContainer.Resolve<IAppConfig>;
-  LIntervalMs := LConfig.GetWorkerInterval;
-  FStopEvent.ResetEvent;
-
-  // Task 1: API -> DB
-  FSyncTask := TTask.Run(
-    procedure
-    begin
-      UILogMessage(lsSystem, 'Task Sync START');
-
-      while (not FIsClosing) and (FStopEvent.WaitFor(LIntervalMs) = wrTimeout) do
-      begin
-        try
-          ExecuteWithRetry(
-            procedure
-            begin
-              LSyncService.ExecuteSync;
-            end);
-        except
-          on E: Exception do
-            TThread.Queue(nil,
-              procedure
-              begin
-                UILogMessage(lsError, 'B³¹d SyncTask: ' + E.Message);
-              end);
-        end;
-      end;
-
-      UILogMessage(lsSystem, 'Task Sync STOP');
-    end);
-
-  // Task 2: DB -> UI
-  FDbWatcherTask := TTask.Run(
-    procedure
-    var
-      LDatabase: IDatabaseManager;
-      LLastId, LCurrentId: Integer;
-    begin
-      UILogMessage(lsSystem, 'Task DB Watcher START');
-
-      try
-        LDatabase := TContainer.Resolve<IDatabaseManager>;
-        LLastId := LDatabase.GetLastRecordId;
-
-        while (not FIsClosing) and (FStopEvent.WaitFor(1000) = wrTimeout) do
-        begin
-          try
-            LCurrentId := LDatabase.GetLastRecordId;
-
-            if LCurrentId > LLastId then
-            begin
-              LLastId := LCurrentId;
-              FEventBus.Publish(TNewDataEvent.Create(LDatabase.GetDataAsJson));
-            end;
-
-          except
-            on E: Exception do
-              TThread.Queue(nil,
-                procedure
-                begin
-                  UILogMessage(lsError, 'B³¹d DB Watcher: ' + E.Message);
-                end);
-          end;
-        end;
-
-      finally
-        UILogMessage(lsSystem, 'Task DB Watcher STOP');
-      end;
-    end);
-
-  FEventBus.Publish(TSyncStateEvent.Create(True, LIntervalMs div 1000));
-  UILogMessage(lsSystem, 'Synchronizacja uruchomiona (PPL)');
-end;
-
-procedure TFormMain.OnSaveSettingsUpdateRequested(const AApiUrl: string; AIntervalMs: Integer);
-var
-  LConfig: IAppConfig;
-begin
-  LConfig := TContainer.Resolve<IAppConfig>;
-  LConfig.UpdateSettings(AApiUrl, AIntervalMs);
-  UILogMessage(lsSystem, 'Pomyœlnie zaktualizowano plik ustawieñ.');
-
-  // Wyœwietlamy Modal (Wartoœæ 0 = Modal nie zamknie siê sam)
-  SafeExecuteScript('showGlobalModal("info", true, "Informacja", "Konfiguracja zapisana", "OK", 0, null);');
-
-  if Assigned(FSyncTask) then
-  begin
-    OnSyncRequested;
-    OnSyncRequested; // To celowe
-    UILogMessage(lsInfo, 'Automatycznie zrestartowano us³ugê synchronizacji z nowymi parametrami.');
-  end;
 end;
 
 { ================= LOG UI ================= }
@@ -657,26 +665,29 @@ begin
   begin
     FStopEvent.SetEvent;
 
-    if Assigned(FSyncTask) then
-    begin
-      try
-        FSyncTask.Wait;
-      except
-      end;
-      FSyncTask := nil;
-    end;
-
-    if Assigned(FDbWatcherTask) then
-    begin
-      try
-        FDbWatcherTask.Wait;
-      except
-      end;
-      FDbWatcherTask := nil;
-    end;
+    // if Assigned(FSyncTask) then
+    // begin
+    // try
+    // FSyncTask.Wait;
+    // except
+    // end;
+    // FSyncTask := nil;
+    // end;
+    //
+    // if Assigned(FDbWatcherTask) then
+    // begin
+    // try
+    // FDbWatcherTask.Wait;
+    // except
+    // end;
+    // FDbWatcherTask := nil;
+    // end;
 
     FreeAndNil(FStopEvent);
   end;
+
+  FSyncTask := nil;
+  FDbWatcherTask := nil;
 
   // 3. SERVER
   FreeAndNil(FHorseServer);
