@@ -664,25 +664,6 @@ begin
   if Assigned(FStopEvent) then
   begin
     FStopEvent.SetEvent;
-
-    // if Assigned(FSyncTask) then
-    // begin
-    // try
-    // FSyncTask.Wait;
-    // except
-    // end;
-    // FSyncTask := nil;
-    // end;
-    //
-    // if Assigned(FDbWatcherTask) then
-    // begin
-    // try
-    // FDbWatcherTask.Wait;
-    // except
-    // end;
-    // FDbWatcherTask := nil;
-    // end;
-
     FreeAndNil(FStopEvent);
   end;
 
