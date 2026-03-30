@@ -106,6 +106,7 @@ begin
     begin
       Result := LConfig;
     end);
+	
   TContainer.RegisterType<IAppLogger>(
     function: IAppLogger
     begin
